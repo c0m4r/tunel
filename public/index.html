@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tunel - e2ee chat</title>
+  <link rel="icon" href="favicon.ico" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <!-- JavaScript is required for WebCrypto and WebSocket -->
+  <noscript>
+    tunel requires JavaScript for end-to-end encryption.<br>
+    Please enable JavaScript to continue.
+  </noscript>
+
+  <!--
+    SVG symbol definition.
+    app.js's patchLogoSVG() replaces each <use href="#tunel-logo"> with inline
+    SVG to avoid cross-browser gradient-scoping bugs when this container is hidden.
+  -->
+  <svg id="logo-def" class="d-none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="tunel-logo" viewBox="0 0 48 48">
+      <defs>
+        <linearGradient id="lg1" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#a78bfa" />
+          <stop offset="100%" stop-color="#60a5fa" />
+        </linearGradient>
+        <linearGradient id="lg2" x1="100%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#f472b6" />
+          <stop offset="100%" stop-color="#7c6af7" />
+        </linearGradient>
+      </defs>
+      <rect width="48" height="48" rx="11" fill="#1a1240" />
+      <path d="M10 38 L10 16 Q10 11 15 11 Q19 11 20.5 15" stroke="url(#lg1)" stroke-width="3.8" fill="none"
+        stroke-linecap="round" />
+      <path d="M20.5 15 Q23 10 28 10 Q38 10 38 20 L38 38" stroke="url(#lg1)" stroke-width="3.8" fill="none"
+        stroke-linecap="round" />
+      <path d="M10 20 Q17 28 24 24 Q31 20 38 28" stroke="url(#lg2)" stroke-width="2" fill="none" stroke-linecap="round"
+        opacity="0.7" />
+      <circle cx="10" cy="38" r="2.5" fill="url(#lg1)" />
+      <circle cx="38" cy="38" r="2.5" fill="url(#lg1)" />
+    </symbol>
+  </svg>
+
+  <!-- ── Desktop ─────────────────────────────────────────────────────────── -->
+  <div id="desktop" role="application" aria-label="tunel secure chat">
+
+    <div id="app-window" role="dialog" aria-label="tunel">
+
+      <!-- ── Title Bar ──────────────────────────────────────────────── -->
+      <div id="title-bar" role="banner">
+        <div class="win-ctrl-group" aria-label="Window controls">
+          <button class="wc wc-close" title="Close" aria-label="Close window"></button>
+          <button class="wc wc-min" title="Minimise" aria-label="Minimise window"></button>
+          <button class="wc wc-max" title="Maximise" aria-label="Maximise window"></button>
+        </div>
+        <div class="win-title-label" aria-hidden="true">
+          <svg width="20" height="20" aria-hidden="true">
+            <use href="#tunel-logo" />
+          </svg>
+          <span>tunel (beta)</span>
+        </div>
+        <!-- #nick-btn injected here by buildNicknameUI() -->
+        <div id="win-conn-badge" role="status" aria-live="polite" aria-atomic="true">connecting</div>
+      </div>
+
+      <!--
+        Inline nick-change popover.
+        Positioned below the title bar; opened/closed by buildNicknameUI() in app.js.
+        Hidden by default via d-none + hidden; both removed on open.
+      -->
+      <div id="nick-popover" class="nick-popover d-none" hidden role="dialog" aria-label="Edit nickname"
+        aria-modal="false">
+        <input id="nick-popover-input" type="text" maxlength="32" placeholder="Your nickname…" autocomplete="off"
+          spellcheck="false" aria-label="Nickname">
+        <button id="nick-popover-save" class="save-nick-btn" type="button">Save</button>
+      </div>
+
+      <!-- ── Window Body ─────────────────────────────────────────────── -->
+      <div id="win-body">
+
+        <!-- ──────────────────────────────────────────────────────────
+             VIEW: Connecting
+        ─────────────────────────────────────────────────────────── -->
+        <div id="view-connecting" class="view" hidden role="status" aria-live="polite"
+          aria-label="Connecting to server">
+          <div class="spinner" aria-hidden="true"></div>
+          <span>Establishing secure connection…</span>
+          <div id="connect-steps" aria-hidden="true">
+            <span id="cstep-ws">↳ opening websocket channel</span>
+            <span id="cstep-key">↳ generating session keys</span>
+            <span id="cstep-exchange">↳ ECDH key exchange</span>
+          </div>
+        </div>
+
+        <!-- ──────────────────────────────────────────────────────────
+             VIEW: Visitor Nickname Setup
+        ─────────────────────────────────────────────────────────── -->
+        <div id="view-setup" class="view" hidden>
+          <div class="login-card" role="main">
+            <div class="logo-wrap" aria-hidden="true">
+              <svg width="44" height="44">
+                <use href="#tunel-logo" />
+              </svg>
+            </div>
+            <h2>Welcome to tunel</h2>
+            <p class="welcome-msg">Choose a nickname to start chatting.</p>
+            <div class="field-group">
+              <label class="field-label" for="setup-nick-input">Nickname</label>
+              <input id="setup-nick-input" class="field-input" type="text" placeholder="e.g. Alice" autocomplete="off"
+                spellcheck="false" maxlength="32" aria-describedby="setup-nick-hint">
+              <p id="setup-nick-hint" class="field-hint">
+                Visible to the host during this session.
+              </p>
+            </div>
+            <button id="setup-start-btn" class="primary-btn" type="button">
+              Start Chatting
+            </button>
+          </div>
+        </div>
+
+        <!-- ──────────────────────────────────────────────────────────
+             VIEW: Visitor Chat
+        ─────────────────────────────────────────────────────────── -->
+        <div id="view-chat" class="view" hidden>
+          <div id="messages" role="log" aria-live="polite" aria-label="Chat messages"></div>
+          <div class="input-area">
+            <div class="char-counter" id="msg-counter" aria-live="polite" aria-atomic="true"></div>
+            <div class="input-row">
+              <textarea id="msg-input" class="msg-textarea" placeholder="Type a message…" rows="1" disabled
+                aria-label="Message" aria-describedby="msg-hint"></textarea>
+              <button id="send-btn" class="send-btn" type="button" disabled aria-label="Send">Send</button>
+            </div>
+            <div class="input-hint" id="msg-hint" aria-hidden="true">
+              Enter ↵ to send &nbsp;·&nbsp; Shift+Enter for new line
+            </div>
+          </div>
+        </div>
+
+        <!-- ──────────────────────────────────────────────────────────
+             VIEW: Visitor Offline Form
+        ─────────────────────────────────────────────────────────── -->
+        <div id="view-offline" class="view" hidden>
+
+          <div id="offline-form-wrap">
+            <div class="offline-header">
+              <div class="lock-icon" aria-hidden="true">🔐</div>
+              <h2>Leave a secure message</h2>
+              <p>The host is offline. Your message will be<br>
+                end-to-end encrypted before sending.</p>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="off-name">Your name</label>
+              <input id="off-name" class="field-input" type="text" placeholder="Alice" autocomplete="name"
+                spellcheck="false" maxlength="100">
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="off-contact">Contact (email or phone)</label>
+              <input id="off-contact" class="field-input" type="text" placeholder="alice@example.com"
+                autocomplete="email" spellcheck="false" maxlength="200">
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="off-msg">Message</label>
+              <textarea id="off-msg" class="field-input" placeholder="Hi, I wanted to reach out about…" rows="4"
+                maxlength="1000"></textarea>
+              <div class="char-counter" id="off-msg-counter" aria-live="polite" aria-atomic="true"></div>
+            </div>
+
+            <div class="enc-notice" role="note">
+              🔒 AES-256-GCM · only the host can decrypt this
+            </div>
+
+            <button id="off-send-btn" class="primary-btn" type="button">
+              Send Encrypted Message
+            </button>
+
+            <p id="off-status" class="off-status-msg" role="status" aria-live="polite"></p>
+          </div>
+
+          <!-- Success screen revealed after server acknowledges receipt -->
+          <div id="offline-success" role="status" aria-live="assertive">
+            <div class="success-ring" aria-hidden="true">✓</div>
+            <div class="success-title">Message sent securely</div>
+            <div class="success-subtitle">
+              Your encrypted message has been delivered.<br>
+              The host will see it when they come online.
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ──────────────────────────────────────────────────────────
+             VIEW: Host Login / Vault Unlock
+        ─────────────────────────────────────────────────────────── -->
+        <div id="view-host-login" class="view" hidden>
+          <div class="login-card" role="main">
+            <div class="logo-wrap" aria-hidden="true">
+              <svg width="44" height="44">
+                <use href="#tunel-logo" />
+              </svg>
+            </div>
+
+            <h2 id="host-login-title">Unlock Vault</h2>
+
+            <!-- First-time setup — hidden while vault exists -->
+            <div id="host-setup-fields" class="d-none">
+              <div class="field-group">
+
+                <label class="field-label" for="host-nick-input">Your name</label>
+                <input id="host-nick-input" class="field-input mb-12" type="text" placeholder="e.g. Bob"
+                  autocomplete="off" spellcheck="false" maxlength="32">
+
+                <label class="field-label" for="host-token-input">Access Token</label>
+                <div class="pass-wrap mb-12">
+                  <input id="host-token-input" class="field-input ls-dense" type="password"
+                    placeholder="Paste HOST_TOKEN here" autocomplete="off" spellcheck="false"
+                    aria-describedby="token-hint">
+                  <button class="pass-toggle" type="button" data-target="host-token-input" aria-label="Show token"
+                    title="Show">●</button>
+                </div>
+                <p id="token-hint" class="field-hint">
+                  Set via the <code>HOST_TOKEN</code> environment variable on the server.
+                </p>
+
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" id="master-pass-label" for="host-lt-pass">
+                Master Password
+              </label>
+              <div class="pass-wrap">
+                <input id="host-lt-pass" class="field-input ls-dense" type="password"
+                  placeholder="Unlocks vault &amp; offline messages" autocomplete="current-password"
+                  aria-describedby="pass-hint">
+                <button class="pass-toggle" type="button" data-target="host-lt-pass" aria-label="Show password"
+                  title="Show">●</button>
+              </div>
+              <p id="pass-hint" class="field-hint">
+                Vault encrypted with PBKDF2-SHA-512 (600&thinsp;000 iterations).
+              </p>
+            </div>
+
+            <button id="host-login-btn" class="primary-btn" type="button">
+              Unlock &amp; Connect
+            </button>
+
+            <p id="login-error" class="login-error d-none" role="alert"></p>
+
+            <div id="vault-reset-wrap" class="mt-12 d-none">
+              <button id="vault-reset-btn" class="link-btn" type="button">
+                Reset identity vault
+              </button>
+              <p class="danger-hint">
+                Offline messages encrypted to the current key will be unrecoverable.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ──────────────────────────────────────────────────────────
+             VIEW: Host Dashboard
+        ─────────────────────────────────────────────────────────── -->
+        <div id="view-host-dash" class="view flex-row" hidden>
+
+          <!-- Sidebar: live visitors + encrypted offline messages -->
+          <div id="sidebar" role="complementary" aria-label="Conversations">
+
+            <div class="sidebar-section">
+              <div class="sidebar-label">Live visitors</div>
+              <div id="visitor-list" role="list" aria-label="Connected visitors">
+                <span class="muted-ph">None</span>
+              </div>
+            </div>
+
+            <div class="sidebar-divider"></div>
+
+            <div class="sidebar-section sidebar-main">
+              <div class="sidebar-label sidebar-hdr">
+                <span>Offline messages</span>
+                <button id="clear-offline-btn" type="button" title="Permanently delete all offline messages">
+                  clear
+                </button>
+              </div>
+              <div class="offline-scroll" id="offline-list" role="list" aria-label="Encrypted offline messages">
+                <span class="muted-ph">None</span>
+              </div>
+            </div>
+
+          </div><!-- /sidebar -->
+
+          <!-- Main chat area -->
+          <div id="host-chat-area" role="main">
+
+            <!--
+              Empty state. Replaced by messages once a visitor is selected.
+              CSS class .host-empty-state centres it; pointer-events:none
+              so it doesn't interfere with JS interactions.
+            -->
+            <div id="messages-host" role="log" aria-live="polite" aria-label="Chat messages">
+              <div class="host-empty-state" aria-hidden="true">
+                <svg width="36" height="36" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M10 38 L10 16 Q10 11 15 11 Q19 11 20.5 15" stroke="currentColor" stroke-width="3"
+                    stroke-linecap="round" />
+                  <path d="M20.5 15 Q23 10 28 10 Q38 10 38 20 L38 38" stroke="currentColor" stroke-width="3"
+                    stroke-linecap="round" />
+                  <path d="M10 20 Q17 28 24 24 Q31 20 38 28" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" opacity="0.5" />
+                  <circle cx="10" cy="38" r="2.5" fill="currentColor" />
+                  <circle cx="38" cy="38" r="2.5" fill="currentColor" />
+                </svg>
+                <span>Select a visitor from the sidebar<br>to begin chatting</span>
+              </div>
+            </div>
+
+            <div class="input-area">
+              <div class="char-counter" id="msg-host-counter" aria-live="polite" aria-atomic="true"></div>
+              <div class="input-row">
+                <textarea id="msg-input-host" class="msg-textarea" placeholder="Select a visitor to start chatting…"
+                  rows="1" disabled aria-label="Message" aria-describedby="msg-host-hint"></textarea>
+                <button id="send-btn-host" class="send-btn" type="button" disabled aria-label="Send">Send</button>
+              </div>
+              <div class="input-hint" id="msg-host-hint" aria-hidden="true">
+                Enter ↵ to send &nbsp;·&nbsp; Shift+Enter for new line
+              </div>
+            </div>
+
+          </div><!-- /host-chat-area -->
+
+        </div><!-- /view-host-dash -->
+
+      </div><!-- /win-body -->
+
+      <!-- ── Status Bar ──────────────────────────────────────────── -->
+      <div id="status-bar" role="status" aria-live="polite" aria-atomic="true">
+        <div id="enc-status">
+          <div class="enc-dot" id="enc-dot" aria-hidden="true"></div>
+          <span id="enc-label">Not encrypted</span>
+        </div>
+        <span id="fingerprint-display"
+          title="Session fingerprint — compare with your peer out-of-band to confirm no MITM"
+          aria-label="Session fingerprint"></span>
+      </div>
+
+    </div><!-- /app-window -->
+
+    <!-- ── Taskbar ───────────────────────────────────────────────── -->
+    <div id="taskbar" role="toolbar" aria-label="Taskbar">
+      <div id="taskbar-app" role="button" tabindex="0" aria-label="tunel — click to show or hide">
+        <svg width="18" height="18" aria-hidden="true">
+          <use href="#tunel-logo" />
+        </svg>
+        tunel
+      </div>
+      <div id="taskbar-right" aria-hidden="true">
+        <span id="taskbar-clock"></span>
+      </div>
+    </div>
+
+  </div><!-- /desktop -->
+
+  <!-- Toast container — screen-reader-accessible via aria-live on individual toasts -->
+  <div id="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>

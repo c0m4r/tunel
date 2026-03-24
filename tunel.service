@@ -1,0 +1,15 @@
+[Unit]
+Description=tunel - End-to-End Encrypted Chat
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/tunel
+EnvironmentFile=/opt/tunel/.env
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

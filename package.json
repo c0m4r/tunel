@@ -1,0 +1,17 @@
+{
+  "name": "tunel",
+  "version": "0.1.0",
+  "description": "End-to-End Encrypted Chat",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "ws": "^8.19.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "license": "MIT"
+}
