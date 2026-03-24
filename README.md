@@ -4,6 +4,8 @@ A self-hosted, browser-based chat with true end-to-end encryption. The server is
 **dumb relay** — it never sees plaintext. All cryptography runs in the browser via the
 native WebCrypto API. No dependencies beyond Node.js and the `ws` library.
 
+<img width="475" height="617" alt="image" src="https://github.com/user-attachments/assets/2f627b99-2fde-446b-bbed-4c178e9609c9" />
+
 ---
 
 ## Security Architecture
